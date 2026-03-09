@@ -1,0 +1,26 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data (dokumen perusahaan tidak boleh masuk repo)
+data/raw/
+data/processed/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
