@@ -15,14 +15,11 @@ Two search methods available:
 """
 
 from typing import List, Tuple
-import sys
-from pathlib import Path
+
 from langchain.schema import Document
 from langchain_chroma import Chroma
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from config import config
+from src.config import config
 from src.utils.logger import get_logger
 
 
@@ -117,7 +114,7 @@ def mmr_search(
 
 
 if __name__ == "__main__":
-    from src.embedding.indexer import get_vector_store
+    from src.embedding.indexer import get_collection_count, get_vector_store
 
     config.validate()
 
@@ -125,7 +122,7 @@ if __name__ == "__main__":
     print("\n🔄 Loading vector store...")
     vector_store = get_vector_store()
 
-    total = vector_store._collection.count()
+    total = get_collection_count(vector_store)
     print(f"   Vectors in store: {total}")
 
     # Test queries

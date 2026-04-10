@@ -13,16 +13,11 @@ Model: text-embedding-3-small
 - Sufficient quality for enterprise document Q&A
 """
 
-import sys
-from pathlib import Path
 from typing import List
+
 from langchain_openai import OpenAIEmbeddings
-from langchain.schema import Document
 
-# Add src directory to path so config can be imported
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from config import config
+from src.config import config
 from src.utils.logger import get_logger
 
 logger = get_logger("src.embedding.embedder")

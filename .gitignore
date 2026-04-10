@@ -31,4 +31,4 @@ llm-continuation-prompt-pack.md
 reviewer-current-state-and-rag-architecture.md
 
 # Agents
-*.egg-info
+enterprise_rag_chatbot.egg-info/

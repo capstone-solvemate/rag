@@ -17,20 +17,13 @@ Cost note:
 """
 
 import os
-# Important imports for config import
-import sys
-from pathlib import Path
-
 from typing import List
 
 import chromadb
 from langchain_chroma import Chroma
 from langchain.schema import Document
 
-# Add src directory to path so config can be imported
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from config import config
+from src.config import config
 from src.embedding.embedder import get_embedding_model
 from src.utils.logger import get_logger
 
@@ -71,6 +64,15 @@ def get_vector_store(reset: bool = False) -> Chroma:
     return vector_store
 
 
+def get_collection_count(vector_store: Chroma) -> int:
+    """Return collection count through one adapter function.
+
+    Chroma count access currently relies on an internal attribute.
+    Keeping that dependency here makes future upgrades simpler and safer.
+    """
+    return int(vector_store._collection.count())
+
+
 def index_documents(chunks: List[Document], reset: bool = False) -> Chroma:
     """
     Embed all chunks and store them in the Chroma vector store.
@@ -87,7 +89,7 @@ def index_documents(chunks: List[Document], reset: bool = False) -> Chroma:
     vector_store = get_vector_store(reset=reset)
 
     # Check how many documents are already indexed
-    existing_count = vector_store._collection.count()
+    existing_count = get_collection_count(vector_store)
     logger.info(f"Existing documents in store: {existing_count}")
 
     if existing_count > 0 and not reset:
@@ -104,7 +106,7 @@ def index_documents(chunks: List[Document], reset: bool = False) -> Chroma:
 
     vector_store.add_documents(chunks)
 
-    final_count = vector_store._collection.count()
+    final_count = get_collection_count(vector_store)
     logger.info(f"✅ Indexing complete. Total vectors in store: {final_count}")
 
     return vector_store
@@ -133,7 +135,7 @@ if __name__ == "__main__":
     vector_store = index_documents(chunks, reset=False)
 
     # ── Summary ──────────────────────────────────────────────────
-    total = vector_store._collection.count()
+    total = get_collection_count(vector_store)
     print(f"\n{'='*50}")
     print(f"✅ INDEXING COMPLETE")
     print(f"   Chunks indexed : {total}")

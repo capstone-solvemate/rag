@@ -15,14 +15,11 @@ Target: Precision@K >= 0.6 (project success criterion)
 """
 
 from typing import List, Dict
-import sys
-from pathlib import Path
+
 from langchain_chroma import Chroma
 
 from src.retrieval.retriever import similarity_search_with_score
 from src.utils.logger import get_logger
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 logger = get_logger("src.retrieval.evaluator")
 
@@ -143,7 +140,7 @@ def evaluate_retriever(vector_store: Chroma, k: int = 5) -> Dict:
 
 if __name__ == "__main__":
     from src.embedding.indexer import get_vector_store
-    from config import config
+    from src.config import config
 
     config.validate()
 
