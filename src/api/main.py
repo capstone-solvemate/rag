@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from src.api.routes.chat import router as chat_router   
 from src.api.routes.health import health_check
 from src.api.schemas.response import ErrorResponse, HealthResponse
 from src.config import config
@@ -60,6 +61,8 @@ app = FastAPI(
 async def get_health() -> HealthResponse:
     return await health_check()
 
+app.include_router(chat_router)
+
 
 # ---------------------------------------------------------------------------
 # Global exception handler
@@ -75,3 +78,4 @@ async def unhandled_exception_handler(request, exc: Exception):
             error_code="INTERNAL_ERROR",
         ).model_dump(),
     )
+
