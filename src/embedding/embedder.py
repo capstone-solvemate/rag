@@ -22,24 +22,50 @@ from src.utils.logger import get_logger
 
 logger = get_logger("src.embedding.embedder")
 
+# Module-level cache: holds the last-constructed instance and the config key
+# it was built from.  A tuple of (model, api_key, dimensions) uniquely
+# identifies an OpenAIEmbeddings configuration.  If config changes between
+# calls (e.g. in tests) the instance is rebuilt automatically.
+_embedding_model_cache: OpenAIEmbeddings | None = None
+_embedding_model_cache_key: tuple | None = None
+
 
 def get_embedding_model() -> OpenAIEmbeddings:
     """
-    Initialize and return the OpenAI embedding model.
+    Return the OpenAI embedding model, constructing it at most once per
+    unique config combination within a process lifetime.
 
-    Returns a singleton-like object — LangChain handles
-    connection pooling internally.
+    The instance is cached at module level.  If the relevant config values
+    change (model, api_key, dimensions) the cache is invalidated and the
+    instance is rebuilt.  This is safe for the single-threaded FastAPI
+    startup path and for tests that patch config between calls.
+
+    Returns:
+        Cached (or freshly constructed) OpenAIEmbeddings instance.
     """
+    global _embedding_model_cache, _embedding_model_cache_key
+
+    cache_key = (
+        config.EMBEDDING_MODEL,
+        config.OPENAI_API_KEY,
+        config.EMBEDDING_DIMENSIONS,
+    )
+
+    if _embedding_model_cache is not None and _embedding_model_cache_key == cache_key:
+        logger.debug("Returning cached embedding model.")
+        return _embedding_model_cache
+
     logger.info(f"Initializing embedding model: {config.EMBEDDING_MODEL}")
 
-    embeddings = OpenAIEmbeddings(
+    _embedding_model_cache = OpenAIEmbeddings(
         model=config.EMBEDDING_MODEL,
         openai_api_key=config.OPENAI_API_KEY,
         dimensions=config.EMBEDDING_DIMENSIONS,
     )
+    _embedding_model_cache_key = cache_key
 
     logger.info("✅ Embedding model ready.")
-    return embeddings
+    return _embedding_model_cache
 
 
 def embed_single_text(text: str) -> List[float]:
