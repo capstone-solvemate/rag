@@ -8,13 +8,17 @@ class Message(BaseModel):
     content: str = Field(..., min_length=1)
 
 
+# src/api/schemas/chat.py
+from typing import Literal
+from pydantic import BaseModel, Field, model_validator
+
+
+class Message(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1)
+
+
 class ChatRequest(BaseModel):
-    query: str = Field(
-        ...,
-        min_length=1,
-        max_length=2000,
-        description="The user's question to answer from the document corpus.",
-    )
     k: int = Field(
         default=5,
         ge=1,
@@ -22,9 +26,21 @@ class ChatRequest(BaseModel):
         description="Number of chunks to retrieve. Must be between 1 and 20.",
     )
     history: list[Message] = Field(
-        default_factory=list,
-        description="Conversation history in OpenAI message format.",
+        ...,
+        min_length=1,
+        description="Conversation history in OpenAI message format. Last message must be from user.",
     )
+
+    @model_validator(mode="after")
+    def last_message_must_be_user(self) -> "ChatRequest":
+        if self.history[-1].role != "user":
+            raise ValueError("The last message in history must have role 'user'.")
+        return self
+
+    @property
+    def query(self) -> str:
+        """Convenience accessor for the latest user query."""
+        return self.history[-1].content
 
 
 class SourceDocument(BaseModel):

@@ -1,3 +1,4 @@
+# src/api/routes/chat.py
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -6,7 +7,7 @@ from src.api.schemas.chat import ChatRequest, ChatResponse
 from src.core.exceptions import GenerationError
 from src.embedding.indexer import get_vector_store
 from src.llm.context_builder import build_context
-from src.llm.generator import generate_answer
+from src.llm.generator import generate_answer, rewrite_query
 from src.retrieval.retriever import similarity_search
 from src.utils.logger import get_logger
 
@@ -20,44 +21,60 @@ router = APIRouter()
     response_model=ChatResponse,
     summary="Ask a question against the document corpus",
     description=(
-        "Accepts a natural language query, retrieves the top-k most relevant "
+        "Accepts a conversation history, retrieves the top-k most relevant "
         "document chunks from the vector store, generates a grounded answer "
         "using gpt-4o-mini, and returns the answer with source citations. "
-        "Status 422 if query is empty. Status 503 if generation fails. "
+        "Status 422 if last message is not from user. Status 503 if generation fails. "
         "Status 404 if no relevant documents are found."
     ),
 )
 async def chat(request: ChatRequest) -> ChatResponse:
-    """End-to-end RAG handler.
+    """End-to-end conversational RAG handler.
 
     Flow:
         ChatRequest
+            → rewrite_query()             rewrite follow-up into standalone query
             → similarity_search()         retrieve top-k chunks
             → build_context()             format chunks + extract sources
-            → generate_answer()           call LLM with context
+            → generate_answer()           call LLM with context + history
             → ChatResponse                return answer + sources
 
     Args:
-        request: Validated ChatRequest containing query and k.
+        request: Validated ChatRequest containing history and k.
 
     Returns:
         ChatResponse with answer string and list of source documents.
 
     Raises:
         HTTPException 404: No relevant documents found for the query.
-        HTTPException 503: LLM generation failed.
+        HTTPException 503: LLM generation or rewrite failed.
         HTTPException 500: Unexpected internal error.
     """
     logger.info(
         f"Chat request received | "
-        f"query_length={len(request.query)} k={request.k}"
+        f"query_length={len(request.query)} "
+        f"history_turns={len(request.history)} "
+        f"k={request.k}"
     )
+
+    # --- Step 0: Rewrite query using conversation history ---
+    try:
+        retrieval_query = await rewrite_query(
+            query=request.query,
+            history=request.history,
+        )
+    except GenerationError as exc:
+        logger.error(f"Query rewrite failed: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail="Query rewriting failed. Please try again later.",
+        )
 
     # --- Step 1: Retrieve relevant chunks ---
     try:
         vector_store = get_vector_store()
         documents = similarity_search(
-            query=request.query,
+            query=retrieval_query,
             vector_store=vector_store,
             k=request.k,
         )
@@ -69,7 +86,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
     if not documents:
-        logger.warning(f"No relevant documents found | query='{request.query}'")
+        logger.warning(f"No relevant documents found | query='{retrieval_query}'")
         raise HTTPException(
             status_code=404,
             detail="No relevant documents found for the given query.",
@@ -89,7 +106,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     # --- Step 3: Generate answer ---
     try:
-        answer = generate_answer(query=request.query, context=context_str)
+        answer = await generate_answer(
+            query=request.query,
+            context=context_str,
+            history=request.history,
+        )
     except GenerationError as exc:
         logger.error(f"Generation failed: {exc}")
         raise HTTPException(

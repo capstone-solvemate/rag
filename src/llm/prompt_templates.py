@@ -59,3 +59,29 @@ def build_user_prompt(query: str, context: str) -> str:
         context=context.strip(),
         query=query.strip(),
     )
+
+QUERY_REWRITE_TEMPLATE = """Given the conversation history below and a follow-up \
+question, rewrite the follow-up question into a standalone question that captures \
+all necessary context from the history. Then translate it to English if it is not \
+already in English.
+
+Rules:
+1. Return only the final question — no explanation, no preamble.
+2. Preserve the original intent of the follow-up question.
+3. If the follow-up question is already standalone, do not add unnecessary context.
+4. Always return the question in English.
+
+Conversation history:
+{history}
+
+Follow-up question: {question}
+
+Standalone question in English:"""
+
+
+_TRANSLATE_QUERY_TEMPLATE = """Translate the following question to English. \
+Return only the translated question — no explanation, no preamble.
+
+Question: {question}
+
+English:"""

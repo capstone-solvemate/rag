@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 
 from langchain.schema import Document
 
-from src.api.schemas.response import SourceDocument
+from src.api.schemas.chat import SourceDocument
 
 
 def _get_meta(doc: Document, key: str, default: Optional[str] = None) -> Optional[str]:

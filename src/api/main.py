@@ -8,7 +8,8 @@ from fastapi.responses import JSONResponse
 from src.api.routes.chat import router as chat_router
 from src.api.routes.knowledge_base import router as kb_router      
 from src.api.routes.health import health_check
-from src.api.schemas.response import ErrorResponse, HealthResponse
+from src.api.schemas.common import ErrorResponse
+from src.api.schemas.health import HealthResponse
 from src.config import config
 from src.utils.logger import get_logger
 
