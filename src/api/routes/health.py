@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.api.schemas.response import HealthResponse
+from src.api.schemas.health import HealthResponse
 from src.embedding.embedder import embed_single_text
 from src.embedding.indexer import get_collection_count, get_vector_store
 from src.utils.logger import get_logger

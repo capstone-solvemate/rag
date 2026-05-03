@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from src.api.schemas.request import ChatRequest
-from src.api.schemas.response import ChatResponse
+from src.api.schemas.chat import ChatRequest, ChatResponse
 from src.core.exceptions import GenerationError
 from src.embedding.indexer import get_vector_store
 from src.llm.context_builder import build_context
