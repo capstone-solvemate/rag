@@ -87,9 +87,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     if not documents:
         logger.warning(f"No relevant documents found | query='{retrieval_query}'")
-        raise HTTPException(
-            status_code=404,
-            detail="No relevant documents found for the given query.",
+        return ChatResponse(
+            query=request.query,
+            answer="I'm sorry, I couldn't find any relevant information in the knowledge base to answer your question.",
+            sources=[],
         )
 
     logger.info(f"Retrieved {len(documents)} chunks.")
