@@ -85,3 +85,98 @@ Return only the translated question — no explanation, no preamble.
 Question: {question}
 
 English:"""
+
+# ---------------------------------------------------------------------------
+# Vision messages builder
+# ---------------------------------------------------------------------------
+# Constructs the OpenAI messages list for the /chat/image endpoint.
+# The image is sent as a base64 data URI in the user turn alongside
+# the retrieved context and the query.
+#
+# Structure:
+#   [ SystemMessage, UserMessage(text: context+query, image_url: data URI) ]
+#
+# The image_url content block must come BEFORE the text block — OpenAI
+# processes the image first, then grounds it against the text context.
+# ---------------------------------------------------------------------------
+ 
+def build_vision_messages(
+    query: str,
+    context: str,
+    image_base64: str,
+    media_type: str,
+) -> list[dict]:
+    """Construct the OpenAI messages array for a vision-augmented RAG query.
+ 
+    Combines retrieved document context with an image supplied by the caller.
+    The image is treated as additional visual context for the query — retrieval
+    still runs on the text query alone.
+ 
+    The returned list is a plain dict structure (not LangChain objects) so it
+    can be passed directly to the OpenAI client's `messages` parameter, keeping
+    the vision path independent of LangChain's multimodal support gaps.
+ 
+    Args:
+        query:        The user's question (validated, non-empty).
+        context:      Formatted context string from build_context().
+        image_base64: Base64-encoded image data without the data URI prefix.
+        media_type:   MIME type, e.g. "image/jpeg". Used to build the data URI.
+ 
+    Returns:
+        List of message dicts ready for openai.chat.completions.create().
+ 
+    Raises:
+        ValueError: If query, context, or image_base64 is empty or whitespace-only.
+ 
+    Example return shape::
+ 
+        [
+            {"role": "system", "content": "<SYSTEM_PROMPT>"},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/jpeg;base64,<data>"},
+                    },
+                    {
+                        "type": "text",
+                        "text": "Context:\\n...\\n\\nQuestion: ...\\n\\nAnswer:",
+                    },
+                ],
+            },
+        ]
+    """
+    if not query or not query.strip():
+        raise ValueError("query must be a non-empty string.")
+    if not context or not context.strip():
+        raise ValueError("context must be a non-empty string.")
+    if not image_base64 or not image_base64.strip():
+        raise ValueError("image_base64 must be a non-empty string.")
+ 
+    data_uri = f"data:{media_type};base64,{image_base64}"
+ 
+    user_text = _USER_PROMPT_TEMPLATE.format(
+        context=context.strip(),
+        query=query.strip(),
+    )
+ 
+    return [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_uri},
+                },
+                {
+                    "type": "text",
+                    "text": user_text,
+                },
+            ],
+        },
+    ]
