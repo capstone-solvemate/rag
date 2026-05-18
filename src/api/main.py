@@ -6,7 +6,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.api.routes.chat import router as chat_router
-from src.api.routes.knowledge_base import router as kb_router      
+from src.api.routes.image_chat import router as image_chat_router  # ← new
+from src.api.routes.knowledge_base import router as kb_router
 from src.api.routes.health import health_check
 from src.api.schemas.common import ErrorResponse
 from src.api.schemas.health import HealthResponse
@@ -64,7 +65,9 @@ async def get_health() -> HealthResponse:
     return await health_check()
 
 app.include_router(chat_router)
-app.include_router(kb_router)  
+app.include_router(image_chat_router)  # ← new
+app.include_router(kb_router)
+
 
 # ---------------------------------------------------------------------------
 # Global exception handler
@@ -93,8 +96,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
     return JSONResponse(status_code=exc.status_code, content=content)
 
+
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request, exc: Exception):
+async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {type(exc).__name__}: {exc}")
     return JSONResponse(
         status_code=500,
@@ -103,4 +107,3 @@ async def unhandled_exception_handler(request, exc: Exception):
             error_code="INTERNAL_ERROR",
         ).model_dump(),
     )
-
