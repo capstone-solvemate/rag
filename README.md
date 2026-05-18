@@ -9,13 +9,13 @@ client — including an Express.js backend.
 
 ## Current Status
 
-| Metric                | Value                               |
-| --------------------- | ----------------------------------- |
-| Retrieval Precision@5 | 0.96 (target ≥ 0.60) ✅             |
-| API layer             | FastAPI — health + chat endpoints   |
-| Generation model      | gpt-4o-mini                         |
-| Embedding model       | text-embedding-3-small              |
-| Vector store          | Chroma (persisted to disk)          |
+| Metric                | Value                                |
+| --------------------- | ------------------------------------ |
+| Retrieval Precision@5 | 0.96 (target ≥ 0.60) ✅              |
+| API layer             | FastAPI — 5 endpoints across 3 routers |
+| Generation model      | gpt-4o-mini                          |
+| Embedding model       | text-embedding-3-small               |
+| Vector store          | Chroma (persisted to disk)           |
 | Python version        | 3.11.x (recommended) / 3.14.3 (dev) |
 
 ---
@@ -28,6 +28,9 @@ client — including an Express.js backend.
   [FastAPI Service :8000]
     GET  /health
     POST /chat
+    POST /chat/image
+    POST /knowledge-base
+    DELETE /knowledge-base/{doc_id}
           ↓
   [Retrieval Layer]
     Chroma vector store
@@ -38,14 +41,44 @@ client — including an Express.js backend.
     Context-grounded answer
 ```
 
-### Request flow
+### Request flow — `POST /chat`
 
 ```
-POST /chat  { query, k }
+POST /chat  { history, k }
+    → rewrite_query()           standalone English query from conversation history
     → similarity_search()       top-k chunks from Chroma
     → build_context()           numbered context block + sources
     → generate_answer()         grounded answer from gpt-4o-mini
     → { query, answer, sources }
+```
+
+### Request flow — `POST /chat/image`
+
+```
+POST /chat/image  { query, image_base64, media_type, k }
+    → similarity_search()           top-k chunks from Chroma (text query only)
+    → build_context()               numbered context block + sources
+    → generate_answer_with_image()  grounded answer from gpt-4o-mini (vision)
+    → { query, answer, sources }
+```
+
+### Request flow — `POST /knowledge-base`
+
+```
+POST /knowledge-base  { doc_id, file_path, file_name }
+    → load_single_document()    load file from shared storage path
+    → chunk_documents()         split into overlapping chunks
+    → index_documents()         embed + persist to Chroma with doc_id stamp
+    → { doc_id, file_name, chunks_indexed, status: "indexed" }
+```
+
+### Request flow — `DELETE /knowledge-base/{doc_id}`
+
+```
+DELETE /knowledge-base/{doc_id}
+    → get_ids_by_doc_id()   fetch Chroma vector IDs for doc_id
+    → delete_by_doc_id()    remove all matching vectors
+    → { doc_id, chunks_deleted, status: "deleted" }
 ```
 
 ---
@@ -61,42 +94,47 @@ enterprise-rag-chatbot/
 │   └── chroma/                 persisted vector store
 ├── src/
 │   ├── config.py               central configuration
+│   ├── main.py                 FastAPI app entrypoint
 │   ├── core/
 │   │   └── exceptions.py       shared exception types
 │   ├── api/
-│   │   ├── main.py             FastAPI app entrypoint
 │   │   ├── routes/
 │   │   │   ├── health.py       GET /health
-│   │   │   └── chat.py         POST /chat
+│   │   │   ├── chat.py         POST /chat
+│   │   │   ├── image_chat.py   POST /chat/image
+│   │   │   └── knowledge_base.py  POST + DELETE /knowledge-base
 │   │   └── schemas/
-│   │       ├── request.py      ChatRequest
-│   │       └── response.py     ChatResponse, HealthResponse, ErrorResponse
+│   │       ├── chat.py         ChatRequest, ChatResponse, SourceDocument
+│   │       ├── image_chat.py   ImageChatRequest
+│   │       ├── knowledge_base.py  AddKnowledgeBaseRequest/Response, DeleteKnowledgeBaseResponse
+│   │       ├── health.py       HealthResponse
+│   │       └── common.py       ErrorResponse
 │   ├── data/
 │   │   ├── loader.py           document loading (.pdf, .docx, .txt)
 │   │   └── chunker.py          text splitting + chunks.json artifact
 │   ├── embedding/
 │   │   ├── embedder.py         OpenAI embedding client
-│   │   └── indexer.py          Chroma vector store init and indexing
+│   │   └── indexer.py          Chroma vector store init, indexing, and doc_id adapter
 │   ├── llm/
 │   │   ├── context_builder.py  retrieved docs → formatted context string
-│   │   ├── prompt_templates.py system prompt + user prompt builder
-│   │   └── generator.py        gpt-4o-mini answer generation
+│   │   ├── prompt_templates.py system prompt, user prompt, vision messages builder
+│   │   └── generator.py        answer generation (text and vision)
 │   ├── retrieval/
 │   │   ├── retriever.py        similarity and MMR search
 │   │   └── evaluator.py        Precision@K evaluation
 │   └── utils/
 │       └── logger.py           logger factory
 ├── tests/
-│   ├── conftest.py             shared fixtures and document factory
+│   ├── conftest.py
+│   ├── api/
+│   │   ├── test_api_health.py
+│   │   ├── test_api_chat.py
+│   │   └── test_image_chat.py
 │   ├── test_context_builder.py
 │   ├── test_prompt_templates.py
 │   ├── test_generator.py
-│   ├── test_api_health.py
-│   ├── test_api_chat.py
 │   ├── test_e2e_rag_pipeline.py
 │   └── test_openai_connection.py
-├── requirements.txt
-├── requirements.lock           deterministic dependency tree
 ├── pyproject.toml
 └── .python-version
 ```
@@ -107,7 +145,7 @@ enterprise-rag-chatbot/
 
 ### Prerequisites
 
-- Python 3.11.x (recommended for production) or 3.14.3 (dev environment)
+- [uv](https://docs.astral.sh/uv/) — used for environment creation and dependency management
 - An OpenAI API key
 
 > **Note:** This project was developed on Python 3.14.3 (pre-release).
@@ -121,16 +159,11 @@ enterprise-rag-chatbot/
 git clone <repo-url>
 cd enterprise-rag-chatbot
 
-# Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate        # Linux / macOS
-.venv\Scripts\activate.bat       # Windows
-
-# Install dependencies from the lock file (deterministic)
-pip install -r requirements.lock
+# Create virtual environment and install all dependencies (deterministic)
+uv sync
 
 # Install the package in editable mode
-pip install -e .
+uv pip install -e .
 ```
 
 ### Environment variables
@@ -151,10 +184,10 @@ Place your documents in `data/raw/`. Supported formats: `.pdf`, `.docx`, `.txt`.
 
 ```bash
 # Step 1 — chunk documents and write inspection artifact
-python src/data/chunker.py
+uv run python src/data/chunker.py
 
 # Step 2 — embed chunks and persist to Chroma
-python src/embedding/indexer.py
+uv run python src/embedding/indexer.py
 ```
 
 After indexing, `data/processed/chunks.json` contains the chunked text
@@ -165,7 +198,7 @@ for inspection and `data/chroma/` contains the persisted vector store.
 ## Running the API
 
 ```bash
-python -m uvicorn src.api.main:app --reload
+uv run uvicorn src.main:app --reload
 ```
 
 The service starts on `http://localhost:8000`.
@@ -194,31 +227,29 @@ Returns service status, Chroma document count, and OpenAI reachability.
 
 Status is `"degraded"` if OpenAI is unreachable or no documents are indexed.
 
-**PowerShell**
-
-```powershell
-(Invoke-WebRequest -Uri http://localhost:8000/health).Content | python -m json.tool
-```
-
 ---
 
 ### `POST /chat`
 
-Accepts a query and returns a grounded answer with source citations.
+Accepts a conversation history and returns a grounded answer with source citations.
+The last message in `history` must have `role: "user"`. Multi-turn conversations
+are supported — prior turns are used to rewrite the query before retrieval.
 
 **Request body**
 
 ```json
 {
-  "query": "How do I replace the ink cartridge?",
+  "history": [
+    { "role": "user", "content": "How do I replace the ink cartridge?" }
+  ],
   "k": 5
 }
 ```
 
-| Field   | Type    | Required | Default | Constraints       |
-| ------- | ------- | -------- | ------- | ----------------- |
-| `query` | string  | Yes      | —       | 1–2000 characters |
-| `k`     | integer | No       | 5       | 1–20              |
+| Field     | Type    | Required | Default | Constraints                              |
+| --------- | ------- | -------- | ------- | ---------------------------------------- |
+| `history` | array   | Yes      | —       | Min 1 message. Last message must be user |
+| `k`       | integer | No       | 5       | 1–20                                     |
 
 **Response**
 
@@ -238,58 +269,144 @@ Accepts a query and returns a grounded answer with source citations.
 
 **Error responses**
 
-| Status | Condition                                          |
-| ------ | -------------------------------------------------- |
-| 404    | No relevant documents found for the query          |
-| 422    | Invalid request body (empty query, k out of range) |
-| 503    | Answer generation failed                           |
-| 500    | Unexpected internal error                          |
+| Status | Condition                                              |
+| ------ | ------------------------------------------------------ |
+| 422    | Invalid request body (last message not user, k out of range) |
+| 503    | Query rewrite or answer generation failed              |
+| 500    | Unexpected internal error                              |
 
-**PowerShell**
+---
 
-```powershell
-(Invoke-WebRequest `
-  -Uri http://localhost:8000/chat `
-  -Method POST `
-  -ContentType "application/json" `
-  -Body '{"query": "How do I replace the ink cartridge?", "k": 5}' `
-).Content | python -m json.tool
+### `POST /chat/image`
+
+Accepts a text query and a base64-encoded image. Retrieval runs on the text query;
+the image is sent to gpt-4o-mini as additional visual context. Single-turn only —
+no conversation history.
+
+**Request body**
+
+```json
+{
+  "query": "What does the chart in this image show?",
+  "image_base64": "<base64-encoded image, no data URI prefix>",
+  "media_type": "image/jpeg",
+  "k": 5
+}
 ```
 
-**curl**
+| Field          | Type    | Required | Default | Constraints                                          |
+| -------------- | ------- | -------- | ------- | ---------------------------------------------------- |
+| `query`        | string  | Yes      | —       | Non-blank                                            |
+| `image_base64` | string  | Yes      | —       | Non-blank, no `data:...;base64,` prefix              |
+| `media_type`   | string  | Yes      | —       | One of: `image/jpeg`, `image/png`, `image/webp`, `image/gif` |
+| `k`            | integer | No       | 5       | 1–20                                                 |
 
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"query": "How do I replace the ink cartridge?", "k": 5}'
+**Response** — same shape as `POST /chat`.
+
+**Error responses**
+
+| Status | Condition                                        |
+| ------ | ------------------------------------------------ |
+| 422    | Blank query, blank image, unsupported media type |
+| 503    | Answer generation failed                         |
+| 500    | Retrieval or context building failed             |
+
+---
+
+### `POST /knowledge-base`
+
+Indexes a document into the vector store. The file must already exist at `file_path`
+on storage accessible to the RAG service.
+
+**Request body**
+
+```json
+{
+  "doc_id": "doc_abc123",
+  "file_path": "/shared/uploads/manual.pdf",
+  "file_name": "manual.pdf"
+}
 ```
+
+**Response**
+
+```json
+{
+  "doc_id": "doc_abc123",
+  "file_name": "manual.pdf",
+  "chunks_indexed": 38,
+  "status": "indexed"
+}
+```
+
+**Error responses**
+
+| Status | Condition                              |
+| ------ | -------------------------------------- |
+| 409    | `doc_id` already exists in the store   |
+| 422    | Invalid request body                   |
+| 500    | File loading or indexing failed        |
+
+---
+
+### `DELETE /knowledge-base/{doc_id}`
+
+Removes all vectors associated with a document from the vector store.
+
+**Response**
+
+```json
+{
+  "doc_id": "doc_abc123",
+  "chunks_deleted": 38,
+  "status": "deleted"
+}
+```
+
+**Error responses**
+
+| Status | Condition                            |
+| ------ | ------------------------------------ |
+| 404    | `doc_id` not found in the store      |
+| 500    | Unexpected internal error            |
 
 ---
 
 ## Express.js Integration
 
-The FastAPI service is designed to be consumed by an Express backend.
-Express does not need to know anything about Python, LangChain, or Chroma —
-it makes a standard HTTP POST and receives a JSON response.
-
 ```javascript
-// Example Express route calling the RAG service
-app.post("/api/chat", async (req, res) => {
-  const { query, k = 5 } = req.body;
+// POST /chat — conversational query
+const chatResponse = await fetch("http://localhost:8000/chat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    history: [{ role: "user", content: query }],
+    k: 5,
+  }),
+});
 
-  const ragResponse = await fetch("http://localhost:8000/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, k }),
-  });
+// POST /chat/image — query with image context
+const imageResponse = await fetch("http://localhost:8000/chat/image", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    query,
+    image_base64: base64String,   // strip the "data:...;base64," prefix first
+    media_type: "image/jpeg",
+    k: 5,
+  }),
+});
 
-  if (!ragResponse.ok) {
-    const error = await ragResponse.json();
-    return res.status(ragResponse.status).json(error);
-  }
+// POST /knowledge-base — index a document
+await fetch("http://localhost:8000/knowledge-base", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ doc_id, file_path, file_name }),
+});
 
-  const data = await ragResponse.json();
-  res.json(data);
+// DELETE /knowledge-base/:docId — remove a document
+await fetch(`http://localhost:8000/knowledge-base/${docId}`, {
+  method: "DELETE",
 });
 ```
 
@@ -302,24 +419,23 @@ service address of the FastAPI container.
 
 ```bash
 # Full test suite
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # With coverage report
-pytest tests/ --cov=src --cov-report=term-missing
+uv run pytest tests/ --cov=src --cov-report=term-missing
 
 # Single test file
-pytest tests/test_e2e_rag_pipeline.py -v
+uv run pytest tests/api/test_image_chat.py -v
 ```
 
-No `OPENAI_API_KEY` is required to run the test suite.
-All external calls are mocked.
+No `OPENAI_API_KEY` is required to run the test suite — all external calls are mocked.
 
 ---
 
 ## Retrieval Evaluation
 
 ```bash
-python src/retrieval/evaluator.py
+uv run python src/retrieval/evaluator.py
 ```
 
 Runs Precision@K against the hardcoded test query set and reports
@@ -329,24 +445,22 @@ pass/fail against the ≥ 0.60 threshold.
 
 ## Known Issues and Deferred Items
 
-| Item                                                            | Severity | Target  |
-| --------------------------------------------------------------- | -------- | ------- |
-| `CHROMA_PERSIST_DIR` path inconsistency with `DATA_RAW_DIR`     | Major    | Phase 2 |
-| Import strategy inconsistency in pre-Phase 0 modules            | Major    | Phase 2 |
-| No unit tests for loader, chunker, embedder, indexer, retriever | Major    | Phase 2 |
-| Evaluator uses hardcoded keyword heuristics                     | Medium   | Phase 2 |
-| No API authentication                                           | Critical | Phase 3 |
-| No containerization (Dockerfile)                                | Major    | Phase 3 |
-| No structured logging with correlation IDs                      | Medium   | Phase 2 |
-| Python 3.14.3 is pre-release — not recommended for production   | Major    | Phase 3 |
+| Item                                                          | Severity | Target  |
+| ------------------------------------------------------------- | -------- | ------- |
+| No API authentication                                         | Critical | Phase 5 |
+| No containerization (Dockerfile)                              | Major    | Phase 3 |
+| No structured logging with correlation IDs                    | Medium   | Backlog |
+| Python 3.14.3 is pre-release — not recommended for production | Major    | Phase 3 |
 
 ---
 
 ## Roadmap
 
-| Phase   | Focus                                                              | Status     |
-| ------- | ------------------------------------------------------------------ | ---------- |
-| Phase 0 | Import cleanup, path normalization                                 | ✅ Done    |
-| Phase 1 | API layer, LLM generation, end-to-end pipeline                     | ✅ Done    |
-| Phase 2 | Hybrid retrieval, expanded metrics, unit tests, structured logging | 🔲 Planned |
-| Phase 3 | Auth, containerization, CI pipeline, production hardening          | 🔲 Planned |
+| Phase   | Focus                                                                    | Status      |
+| ------- | ------------------------------------------------------------------------ | ----------- |
+| Phase 0 | Import cleanup, path normalization                                       | ✅ Done     |
+| Phase 1 | API layer, LLM generation, end-to-end pipeline                           | ✅ Done     |
+| Phase 2 | Knowledge base CRUD, multi-turn chat, query rewrite                      | ✅ Done     |
+| Phase 3 | Unit tests, Chroma adapter refactor, Dockerfile, README                  | ✅ Done     |
+| Phase 4 | Image input (vision) via `POST /chat/image`                              | ✅ Done     |
+| Phase 5 | Query intelligence: gap logging, category retrieval, SSE streaming       | 🔲 Planned  |
