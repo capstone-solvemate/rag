@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from langchain_openai import ChatOpenAI
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src.api.schemas.chat import Message
 from src.config import config

@@ -129,7 +129,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         f"Chat response ready | "
         f"answer_length={len(answer)} sources={len(sources)}"
     )
-
+    
     return ChatResponse(
         query=request.query,
         answer=answer,

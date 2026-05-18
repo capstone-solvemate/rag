@@ -22,7 +22,7 @@ from langchain_community.document_loaders import (
     PyPDFLoader,       # .pdf
     Docx2txtLoader,    # .docx
 )
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from src.utils.logger import get_logger
 

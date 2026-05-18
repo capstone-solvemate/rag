@@ -1,4 +1,3 @@
-# src/embedding/indexer.py
 """
 Indexer: embeds all document chunks and stores them in Chroma vector store.
 
@@ -21,7 +20,7 @@ from typing import List
 
 import chromadb
 from langchain_chroma import Chroma
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from src.config import config
 from src.embedding.embedder import get_embedding_model
@@ -71,6 +70,56 @@ def get_collection_count(vector_store: Chroma) -> int:
     Keeping that dependency here makes future upgrades simpler and safer.
     """
     return int(vector_store._collection.count())
+
+
+def get_ids_by_doc_id(doc_id: str) -> list[str]:
+    """
+    Return all Chroma vector IDs associated with the given doc_id.
+
+    An empty list means the doc_id is not indexed.
+    Used by both the POST (conflict check) and DELETE (fetch-then-delete) paths.
+
+    All _collection access is intentionally kept inside this module so
+    no route or caller ever touches the private Chroma API directly.
+
+    Args:
+        doc_id: The document identifier stamped onto chunk metadata at index time.
+
+    Returns:
+        List of Chroma vector IDs for the doc_id, or [] if none found.
+    """
+    vector_store = get_vector_store()
+    result = vector_store._collection.get(where={"doc_id": doc_id})
+    return result.get("ids", [])
+
+
+def delete_by_doc_id(doc_id: str) -> int:
+    """
+    Delete all vectors associated with the given doc_id from Chroma.
+
+    Fetches the full ID list first so the caller gets an exact deleted count.
+    Deletion is a single call against the explicit ID list — version-safe and
+    avoids a second metadata scan inside Chroma.
+
+    All _collection access is intentionally kept inside this module so
+    no route or caller ever touches the private Chroma API directly.
+
+    Args:
+        doc_id: The document identifier to remove.
+
+    Returns:
+        Number of vectors deleted. Returns 0 if doc_id was not found
+        (caller is responsible for treating 0 as a not-found condition
+        if needed).
+    """
+    matching_ids = get_ids_by_doc_id(doc_id)
+    if not matching_ids:
+        return 0
+
+    vector_store = get_vector_store()
+    vector_store._collection.delete(ids=matching_ids)
+    logger.info(f"Deleted doc_id={doc_id!r} | {len(matching_ids)} vectors removed.")
+    return len(matching_ids)
 
 
 def index_documents(

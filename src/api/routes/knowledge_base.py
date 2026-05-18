@@ -1,4 +1,3 @@
-# src/api/routes/knowledge_base.py
 """
 Knowledge Base management endpoints.
 
@@ -8,7 +7,7 @@ DELETE /knowledge-base/{doc_id} — remove all vectors for a document
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from src.api.schemas.knowledge_base import (
     AddKnowledgeBaseRequest,
@@ -17,28 +16,13 @@ from src.api.schemas.knowledge_base import (
 )
 from src.data.loader import load_single_document
 from src.data.chunker import chunk_documents
-from src.embedding.indexer import get_vector_store, index_documents
+from src.embedding.indexer import get_ids_by_doc_id, delete_by_doc_id, index_documents
 from src.utils.logger import get_logger
 
 logger = get_logger("src.api.routes.knowledge_base")
 
 router = APIRouter()
 
-
-def _get_doc_ids(doc_id: str) -> list[str]:
-    """
-    Return all Chroma vector IDs associated with the given doc_id.
-
-    An empty list means the doc_id is not indexed.
-    Used by both the POST (conflict check) and DELETE (fetch-then-delete) paths.
-
-    Note:
-        Uses the private _collection accessor, consistent with
-        get_collection_count(). Flagged as Phase 3 cleanup target.
-    """
-    vector_store = get_vector_store()
-    result = vector_store._collection.get(where={"doc_id": doc_id})
-    return result.get("ids", [])
 
 @router.post(
     "/knowledge-base",
@@ -56,10 +40,10 @@ def add_knowledge_base(request: AddKnowledgeBaseRequest) -> AddKnowledgeBaseResp
     - Sending file_path to this endpoint
 
     Error codes:
-        FILE_NOT_FOUND       — file_path does not exist on disk
+        FILE_NOT_FOUND        — file_path does not exist on disk
         UNSUPPORTED_FILE_TYPE — file extension not in {.txt, .pdf, .docx}
-        DOC_ID_CONFLICT      — doc_id is already present in Chroma
-        INDEXING_FAILED      — unexpected failure during embedding/storage
+        DOC_ID_CONFLICT       — doc_id is already present in Chroma
+        INDEXING_FAILED       — unexpected failure during embedding/storage
     """
     logger.info(
         f"POST /knowledge-base | doc_id={request.doc_id!r} "
@@ -77,7 +61,7 @@ def add_knowledge_base(request: AddKnowledgeBaseRequest) -> AddKnowledgeBaseResp
             },
         )
 
-     # Guard 2: load document — empty return means unsupported extension
+    # Guard 2: load document — empty return means unsupported extension
     ext = Path(request.file_path).suffix.lower()
     documents = load_single_document(request.file_path)
     if not documents:
@@ -98,7 +82,7 @@ def add_knowledge_base(request: AddKnowledgeBaseRequest) -> AddKnowledgeBaseResp
 
     # Guard 3: doc_id must not already be indexed
     try:
-        existing_ids = _get_doc_ids(request.doc_id)
+        existing_ids = get_ids_by_doc_id(request.doc_id)
     except Exception as exc:
         logger.exception(f"Chroma query failed during conflict check: {exc}")
         raise HTTPException(
@@ -147,6 +131,7 @@ def add_knowledge_base(request: AddKnowledgeBaseRequest) -> AddKnowledgeBaseResp
         status="indexed",
     )
 
+
 @router.delete(
     "/knowledge-base/{doc_id}",
     response_model=DeleteKnowledgeBaseResponse,
@@ -157,29 +142,26 @@ def delete_knowledge_base(doc_id: str) -> DeleteKnowledgeBaseResponse:
     """
     Delete every chunk vector associated with the given doc_id.
 
-    The full ID list is fetched first so the response can report an
-    exact chunk count, then deleted in a single call.
-
     Error codes:
-        DOC_NOT_FOUND    — no vectors found for this doc_id in Chroma
-        DELETION_FAILED  — unexpected failure during vector removal
+        DOC_NOT_FOUND   — no vectors found for this doc_id in Chroma
+        DELETION_FAILED — unexpected failure during vector removal
     """
     logger.info(f"DELETE /knowledge-base/{doc_id!r}")
 
-    # Fetch all matching vector IDs
+    # Fetch count and delete in one adapter call
     try:
-        matching_ids = _get_doc_ids(doc_id)
+        chunks_deleted = delete_by_doc_id(doc_id)
     except Exception as exc:
-        logger.exception(f"Failed to query Chroma for doc_id={doc_id!r}: {exc}")
+        logger.exception(f"Deletion failed for doc_id={doc_id!r}: {exc}")
         raise HTTPException(
             status_code=500,
             detail={
-                "detail": "Unexpected failure while querying the knowledge base.",
+                "detail": "Unexpected failure during vector deletion.",
                 "error_code": "DELETION_FAILED",
             },
         )
 
-    if not matching_ids:
+    if chunks_deleted == 0:
         logger.warning(f"doc_id not found in Chroma: {doc_id!r}")
         raise HTTPException(
             status_code=404,
@@ -189,29 +171,8 @@ def delete_knowledge_base(doc_id: str) -> DeleteKnowledgeBaseResponse:
             },
         )
 
-    # Delete by explicit ID list — exact count, version-safe
-    try:
-        vector_store = get_vector_store()
-        vector_store._collection.delete(ids=matching_ids)
-    except Exception as exc:
-        logger.exception(
-            f"Deletion failed for doc_id={doc_id!r} "
-            f"({len(matching_ids)} vectors): {exc}"
-        )
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "detail": "Unexpected failure during vector deletion.",
-                "error_code": "DELETION_FAILED",
-            },
-        )
-
-    logger.info(
-        f"Deleted doc_id={doc_id!r} | {len(matching_ids)} vectors removed."
-    )
-
     return DeleteKnowledgeBaseResponse(
         doc_id=doc_id,
-        chunks_deleted=len(matching_ids),
+        chunks_deleted=chunks_deleted,
         status="deleted",
-    )
+    )   

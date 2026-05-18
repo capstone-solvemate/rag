@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from src.api.schemas.chat import SourceDocument
 
