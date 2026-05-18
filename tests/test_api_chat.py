@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from src.api.main import app
 from src.core.exceptions import GenerationError
@@ -107,35 +107,63 @@ def _patch_rag(
 
 def test_chat_returns_200_on_success(client):
     with _patch_rag():
-        response = client.post("/chat", json={"query": "What is the warranty?"})
+        response = client.post("/chat", json={
+            "history": [
+                {"role": "user", "content": "What is the warranty?"}
+            ]
+        })
 
     assert response.status_code == 200
 
 
 def test_chat_response_contains_answer(client):
     with _patch_rag(answer="The warranty is one year. [1]"):
-        data = client.post("/chat", json={"query": "What is the warranty?"}).json()
+        data = client.post("/chat", json=
+                           {"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]
+                            }).json()
 
     assert data["answer"] == "The warranty is one year. [1]"
 
 
 def test_chat_response_echoes_query(client):
     with _patch_rag():
-        data = client.post("/chat", json={"query": "What is the warranty?"}).json()
+           data = client.post("/chat", json=
+                           {"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]
+                            }).json()
 
     assert data["query"] == "What is the warranty?"
 
 
 def test_chat_response_contains_sources(client):
     with _patch_rag(documents=_make_docs(3)):
-        data = client.post("/chat", json={"query": "Any question."}).json()
+        data = client.post("/chat", json=
+                           {"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]
+                            }).json()
 
     assert len(data["sources"]) == 3
 
 
 def test_chat_source_has_correct_shape(client):
     with _patch_rag(documents=_make_docs(1)):
-        data = client.post("/chat", json={"query": "Any question."}).json()
+        data = client.post("/chat", json=
+                           {"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]
+                            }).json()
 
     source = data["sources"][0]
     assert "file_name" in source
@@ -145,14 +173,27 @@ def test_chat_source_has_correct_shape(client):
 
 def test_chat_uses_default_k_of_5(client):
     with _patch_rag() as mocks:
-        client.post("/chat", json={"query": "Any question."})
+        client.post("/chat", json=
+                           {"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]
+                            }).json()
 
 
 def test_chat_respects_custom_k(client):
     with patch("src.api.routes.chat.get_vector_store", return_value=MagicMock()):
         with patch("src.api.routes.chat.similarity_search", return_value=_make_docs(3)) as mock_search:
             with patch("src.api.routes.chat.generate_answer", return_value="Answer."):
-                client.post("/chat", json={"query": "Question.", "k": 3})
+                client.post("/chat", json=
+                           {"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }],
+                             "k": 3
+                            }).json()
 
     mock_search.assert_called_once()
     call_kwargs = mock_search.call_args
@@ -164,7 +205,10 @@ def test_chat_respects_custom_k(client):
 # ---------------------------------------------------------------------------
 
 def test_chat_rejects_empty_query(client):
-    response = client.post("/chat", json={"query": ""})
+    response = client.post("/chat", json={"history": 
+                                [{
+                                    "role": "user"
+                                }]})
     assert response.status_code == 422
 
 
@@ -174,12 +218,22 @@ def test_chat_rejects_missing_query(client):
 
 
 def test_chat_rejects_k_below_minimum(client):
-    response = client.post("/chat", json={"query": "Valid.", "k": 0})
+    response = client.post("/chat", json={"history": 
+                                [{
+                                    "role": "user"
+                                }]})
     assert response.status_code == 422
 
 
 def test_chat_rejects_k_above_maximum(client):
-    response = client.post("/chat", json={"query": "Valid.", "k": 21})
+    response = client.post("/chat", json={
+                                "history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "",
+                                }],
+                                "k": 21
+                                })
     assert response.status_code == 422
 
 
@@ -189,28 +243,46 @@ def test_chat_rejects_k_above_maximum(client):
 
 def test_chat_returns_404_when_no_documents_found(client):
     with _patch_rag(documents=[]):
-        response = client.post("/chat", json={"query": "Unknown topic."})
+        response = client.post("/chat", json={"history": 
+                                [{
+                                    "role": "user", 
+                                     "content": "What is the warranty?"
+                                }]})
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert "couldn't find" in response.json()["answer"]
+    assert response.json()["sources"] == []
 
 
 def test_chat_returns_503_on_generation_error(client):
     with _patch_rag(generation_error=GenerationError("LLM failed.")):
-        response = client.post("/chat", json={"query": "Valid question."})
+        response = client.post("/chat", json={"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]})
 
     assert response.status_code == 503
 
 
 def test_chat_returns_500_on_retrieval_error(client):
     with _patch_rag(retrieval_error=RuntimeError("Chroma connection lost.")):
-        response = client.post("/chat", json={"query": "Valid question."})
+        response = client.post("/chat", json={"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]})
 
     assert response.status_code == 500
 
 
 def test_chat_503_detail_is_user_friendly(client):
     with _patch_rag(generation_error=GenerationError("LLM failed.")):
-        data = client.post("/chat", json={"query": "Valid question."}).json()
+        data = client.post("/chat", json={"history": 
+                                [{
+                                    "role": "user", 
+                                    "content": "What is the warranty?"
+                                }]}).json()
 
     assert "generation" in data["detail"].lower()
     # Internal error detail must not leak to client

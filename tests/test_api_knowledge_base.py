@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from src.api.main import app
 
