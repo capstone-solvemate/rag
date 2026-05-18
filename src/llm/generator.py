@@ -1,6 +1,6 @@
-# src/llm/generator.py
 from __future__ import annotations
 
+import openai
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -11,7 +11,8 @@ from src.llm.prompt_templates import (
     QUERY_REWRITE_TEMPLATE,
     SYSTEM_PROMPT,
     build_user_prompt,
-    _TRANSLATE_QUERY_TEMPLATE
+    build_vision_messages,
+    _TRANSLATE_QUERY_TEMPLATE,
 )
 from src.utils.logger import get_logger
 
@@ -34,6 +35,20 @@ def _get_chat_model() -> ChatOpenAI:
     )
 
 
+def _get_openai_client() -> openai.AsyncOpenAI:
+    """Instantiate a raw AsyncOpenAI client for vision calls.
+
+    LangChain's multimodal support requires extra wrapping for image_url
+    content blocks. Using the raw client here keeps vision messages as plain
+    dicts (built by build_vision_messages) without any LangChain adaptation
+    layer.
+
+    Returns:
+        Configured AsyncOpenAI instance.
+    """
+    return openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+
+
 def _history_to_langchain(history: list[Message]) -> list[HumanMessage | AIMessage]:
     """Convert OpenAI-format history to LangChain message objects.
 
@@ -51,6 +66,7 @@ def _history_to_langchain(history: list[Message]) -> list[HumanMessage | AIMessa
         "assistant": AIMessage,
     }
     return [role_map[msg.role](content=msg.content) for msg in history[:-1]]
+
 
 async def generate_answer(query: str, context: str, history: list[Message]) -> str:
     """Generate a grounded answer from a query, context, and conversation history.
@@ -110,6 +126,79 @@ async def generate_answer(query: str, context: str, history: list[Message]) -> s
 
     logger.info(f"Answer generated successfully | answer_length={len(answer)}")
     return answer
+
+
+async def generate_answer_with_image(
+    query: str,
+    context: str,
+    image_base64: str,
+    media_type: str,
+) -> str:
+    """Generate a grounded answer using both retrieved context and an image.
+
+    Uses the raw AsyncOpenAI client (not LangChain) to send a vision-capable
+    messages array built by build_vision_messages(). Retrieval still runs on
+    the text query — the image is additional visual context for the LLM only.
+
+    The model is always gpt-4o-mini, which supports vision input.
+
+    Args:
+        query:        The user's question.
+        context:      Formatted context string from build_context().
+        image_base64: Base64-encoded image without the data URI prefix.
+        media_type:   MIME type, e.g. "image/jpeg".
+
+    Returns:
+        Answer string from the LLM.
+
+    Raises:
+        GenerationError: If the LLM call fails or returns an empty response.
+        ValueError:      If query, context, or image_base64 is empty.
+    """
+    logger.info(
+        f"Generating vision answer | "
+        f"query_length={len(query)} "
+        f"context_length={len(context)} "
+        f"media_type={media_type}"
+    )
+
+    # Raises ValueError on empty inputs — let it propagate to the route.
+    messages = build_vision_messages(
+        query=query,
+        context=context,
+        image_base64=image_base64,
+        media_type=media_type,
+    )
+
+    try:
+        client = _get_openai_client()
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,  # type: ignore[arg-type]
+            max_tokens=1024,
+            temperature=0,
+        )
+        answer = response.choices[0].message.content or ""
+        answer = answer.strip()
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.error(f"Vision LLM generation failed: {type(exc).__name__}: {exc}")
+        raise GenerationError(
+            message="Vision LLM generation failed. The upstream API call did not succeed.",
+            cause=exc,
+        ) from exc
+
+    if not answer:
+        logger.warning("Vision LLM returned an empty response.")
+        raise GenerationError(
+            message="Vision LLM returned an empty response.",
+            cause=None,
+        )
+
+    logger.info(f"Vision answer generated successfully | answer_length={len(answer)}")
+    return answer
+
 
 async def rewrite_query(query: str, history: list[Message]) -> str:
     """Rewrite and/or translate a query for vector store retrieval.
