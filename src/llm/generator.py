@@ -12,7 +12,7 @@ from src.llm.prompt_templates import (
     SYSTEM_PROMPT,
     build_user_prompt,
     build_vision_messages,
-    _TRANSLATE_QUERY_TEMPLATE,
+    QUERY_REWRITE_NEW_CHAT_TEMPLATE,
 )
 from src.utils.logger import get_logger
 
@@ -68,7 +68,7 @@ def _history_to_langchain(history: list[Message]) -> list[HumanMessage | AIMessa
     return [role_map[msg.role](content=msg.content) for msg in history[:-1]]
 
 
-async def generate_answer(query: str, context: str, history: list[Message]) -> str:
+async def generate_answer(original_question: str, query: str, context: str, history: list[Message]) -> str:
     """Generate a grounded answer from a query, context, and conversation history.
 
     Calls the LLM with:
@@ -95,7 +95,8 @@ async def generate_answer(query: str, context: str, history: list[Message]) -> s
         f"history_turns={len(history) - 1}"
     )
 
-    user_prompt = build_user_prompt(query, context)
+    user_prompt = build_user_prompt(original_question, query, context)
+    logger.info(user_prompt)
     prior_messages = _history_to_langchain(history)
 
     messages = [
@@ -232,7 +233,7 @@ async def rewrite_query(query: str, history: list[Message]) -> str:
 
     # --- Kasus 2: Tidak ada history — translate saja ---
     else:
-        prompt = _TRANSLATE_QUERY_TEMPLATE.format(question=query)
+        prompt = QUERY_REWRITE_NEW_CHAT_TEMPLATE.format(question=query)
         logger.info("No prior history — translating query only.")
 
     try:

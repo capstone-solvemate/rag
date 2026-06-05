@@ -10,6 +10,7 @@ from src.llm.context_builder import build_context
 from src.llm.generator import generate_answer, rewrite_query
 from src.retrieval.retriever import similarity_search
 from src.utils.logger import get_logger
+from src.llm.vision import analyze_images
 
 logger = get_logger(__name__)
 
@@ -56,6 +57,24 @@ async def chat(request: ChatRequest) -> ChatResponse:
         f"history_turns={len(request.history)} "
         f"k={request.k}"
     )
+
+    attachment_available = False
+
+    # --- Step -1: If there are attachments, analyze first ---
+    if len(request.history[-1].pictures) > 0:
+        attachment_available = True
+
+        try:
+            analyze_images_result = await analyze_images(
+                image_urls=[v.data for v in request.history[-1].pictures]
+            )
+            logger.info("Analyze images results: %s", analyze_images_result)
+        except GenerationError as exc:
+            logger.error(f"Analyze images failed: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="Analyze images failed. Please try again later.",
+            )
 
     # --- Step 0: Rewrite query using conversation history ---
     try:
@@ -108,7 +127,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     # --- Step 3: Generate answer ---
     try:
         answer = await generate_answer(
-            query=request.query,
+            original_question=request.query,
+            query=retrieval_query,
             context=context_str,
             history=request.history,
         )
