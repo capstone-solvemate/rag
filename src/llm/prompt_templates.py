@@ -1,4 +1,6 @@
 from __future__ import annotations
+import json
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -121,6 +123,133 @@ def build_user_prompt(original_question: str, query: str, context: str) -> str:
         query=query.strip()
     )
 
+SYSTEM_PROMPT_WITH_PICTURE = """You are a document-grounded troubleshooting assistant.
+
+Answer questions using only information explicitly stated in:
+- the retrieved context
+- the image analysis
+
+Rules:
+
+1. Do not use prior knowledge or make assumptions.
+
+2. Answer in the same language as the user's original question.
+
+3. Translate general explanations into the user's language.
+
+4. Keep technical terms, product names, model names, part names,
+component names, error codes, menu labels, UI labels, and official
+procedure names in their original form.
+
+5. Image analysis may only be used as observational evidence.
+
+6. Do not infer causes, risks, recommendations, troubleshooting steps,
+or solutions from image analysis alone.
+
+7. Troubleshooting steps and corrective actions must come from the
+retrieved context.
+
+8. When multiple context entries contain relevant information,
+combine them into a single answer.
+
+9. Treat source names, file names, chunk numbers, page numbers,
+and other metadata as references only.
+Do not use metadata as evidence.
+
+10. When the context describes a procedure or troubleshooting process,
+present the answer as numbered steps.
+
+11. Citations must support every factual statement or procedure.
+
+12. Place citations at the end of the relevant paragraph, list item,
+or answer section using the format:
+
+<ref:N>
+
+Examples:
+
+<ref:1>
+
+<ref:1><ref:2>
+
+13. Format the answer using Markdown.
+
+- Use numbered lists for procedures.
+- Use bullet lists for non-sequential information.
+- Use short paragraphs.
+- Use inline code formatting for error codes, model numbers,
+  menu names, and technical identifiers when appropriate.
+- Do not use tables unless the context explicitly contains tabular information.
+
+14. If the retrieved context does not contain enough information
+to answer the question, respond with exactly:
+
+I could not find a relevant answer in the available documents.
+
+15. Do not fabricate information, figures, dates, names,
+causes, solutions, procedures, or diagnoses.
+
+16. Keep answers concise, practical, and professional."""
+
+_USER_PROMPT_WITH_PICTURE_TEMPLATE = """Retrieved Context:
+
+<context>
+{context}
+</context>
+
+Original User Question:
+
+<question>
+{originalQuestion}
+</question>
+
+Image Analysis:
+
+<image_analysis>
+{imageAnalysis}
+</image_analysis>
+
+Retrieval Query:
+
+<query>
+{query}
+</query>
+
+Use the retrieved context and image analysis to answer the original user question.
+
+Answer:"""
+
+def build_user_prompt_with_picture(original_question: str, query: str, context: str, image_analysis_results: Optinal[dict]) -> str:
+    """Assemble the user-turn prompt from a query and formatted context string.
+
+    Args:
+        query:   The user's question, already validated by ChatRequest.
+        context: Formatted context string produced by build_context().
+
+    Returns:
+        Fully assembled user-turn prompt string ready for the LLM.
+
+    Raises:
+        ValueError: If query or context is empty or whitespace-only.
+    """
+    if not query or not query.strip():
+        raise ValueError("query must be a non-empty string.")
+    if not context or not context.strip():
+        raise ValueError("context must be a non-empty string.")
+    
+    image_analysis_json = json.dumps(
+        image_analysis_results,
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    return _USER_PROMPT_WITH_PICTURE_TEMPLATE.format(
+        context=context.strip(),
+        originalQuestion=original_question.strip(),
+        query=query.strip(),
+        imageAnalysis=image_analysis_json
+    )
+
 QUERY_REWRITE_TEMPLATE = """Given the conversation history below and a follow-up \
 question, rewrite the follow-up question into a standalone question that captures \
 all necessary context from the history. Then translate it to English if it is not \
@@ -155,6 +284,28 @@ Rules:
 
 User message:
 {question}"""
+
+QUERY_REWRITE_NEW_CHAT_WITH_PICTURES_TEMPLATE = """Convert the user's message and image analysis into an English search query for retrieving relevant Epson manufacturing troubleshooting knowledge.
+
+Rules:
+1. Return only the final English query.
+2. Do not add labels, explanations, notes, or quotation marks.
+3. Preserve the user's intent.
+4. Use relevant information from the image analysis when it helps identify the issue.
+5. Prioritize visible error codes, model names, status messages, component names, and defects found in the image analysis.
+6. Keep technical terms, product names, model numbers, error codes, part names, and identifiers unchanged.
+7. Rewrite informal language into concise technical troubleshooting terminology.
+8. Do not invent information that is not present in the user message or image analysis.
+9. If the user question is vague (for example: "what is wrong?", "how do I fix this?", "what should I do?"), use the image analysis to make the query specific.
+10. Always return the query in English.
+
+User Message:
+{question}
+
+Image Analysis:
+{imageAnalysis}
+
+Retrieval Query:"""
 
 # ---------------------------------------------------------------------------
 # Vision messages builder

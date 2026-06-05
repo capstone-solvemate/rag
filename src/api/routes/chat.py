@@ -58,17 +58,19 @@ async def chat(request: ChatRequest) -> ChatResponse:
         f"k={request.k}"
     )
 
-    attachment_available = False
+    image_analysis_results = None
 
     # --- Step -1: If there are attachments, analyze first ---
     if len(request.history[-1].pictures) > 0:
-        attachment_available = True
-
         try:
-            analyze_images_result = await analyze_images(
-                image_urls=[v.data for v in request.history[-1].pictures]
+            image_analysis_results = await analyze_images(
+                image_urls=[
+                    v.data
+                    for v in request.history[-1].pictures
+                ]
             )
-            logger.info("Analyze images results: %s", analyze_images_result)
+
+            logger.info("Analyze images results: %s", image_analysis_results)
         except GenerationError as exc:
             logger.error(f"Analyze images failed: {exc}")
             raise HTTPException(
@@ -81,6 +83,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         retrieval_query = await rewrite_query(
             query=request.query,
             history=request.history,
+            image_analysis_results=image_analysis_results
         )
     except GenerationError as exc:
         logger.error(f"Query rewrite failed: {exc}")
@@ -131,6 +134,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             query=retrieval_query,
             context=context_str,
             history=request.history,
+            image_analysis_results=image_analysis_results
         )
     except GenerationError as exc:
         logger.error(f"Generation failed: {exc}")

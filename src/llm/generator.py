@@ -10,11 +10,16 @@ from src.core.exceptions import GenerationError
 from src.llm.prompt_templates import (
     QUERY_REWRITE_TEMPLATE,
     SYSTEM_PROMPT,
+    SYSTEM_PROMPT_WITH_PICTURE,
     build_user_prompt,
     build_vision_messages,
+    build_user_prompt_with_picture,
     QUERY_REWRITE_NEW_CHAT_TEMPLATE,
+    QUERY_REWRITE_NEW_CHAT_WITH_PICTURES_TEMPLATE
 )
 from src.utils.logger import get_logger
+import json
+from typing import Optional
 
 logger = get_logger(__name__)
 
@@ -68,7 +73,7 @@ def _history_to_langchain(history: list[Message]) -> list[HumanMessage | AIMessa
     return [role_map[msg.role](content=msg.content) for msg in history[:-1]]
 
 
-async def generate_answer(original_question: str, query: str, context: str, history: list[Message]) -> str:
+async def generate_answer(original_question: str, query: str, context: str, history: list[Message], image_analysis_results: Optional[dict]) -> str:
     """Generate a grounded answer from a query, context, and conversation history.
 
     Calls the LLM with:
@@ -95,12 +100,16 @@ async def generate_answer(original_question: str, query: str, context: str, hist
         f"history_turns={len(history) - 1}"
     )
 
-    user_prompt = build_user_prompt(original_question, query, context)
-    logger.info(user_prompt)
+    if image_analysis_results == None:
+        user_prompt = build_user_prompt(original_question, query, context)
+        system_prompt = SYSTEM_PROMPT
+    else:
+        user_prompt = build_user_prompt_with_picture(original_question, query, context, image_analysis_results)
+        system_prompt = SYSTEM_PROMPT_WITH_PICTURE
     prior_messages = _history_to_langchain(history)
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=system_prompt),
         *prior_messages,
         HumanMessage(content=user_prompt),
     ]
@@ -201,7 +210,7 @@ async def generate_answer_with_image(
     return answer
 
 
-async def rewrite_query(query: str, history: list[Message]) -> str:
+async def rewrite_query(query: str, history: list[Message], image_analysis_results: Optional[dict]) -> str:
     """Rewrite and/or translate a query for vector store retrieval.
 
     - If history exists: rewrite follow-up into standalone question + translate to English.
@@ -233,7 +242,18 @@ async def rewrite_query(query: str, history: list[Message]) -> str:
 
     # --- Kasus 2: Tidak ada history — translate saja ---
     else:
-        prompt = QUERY_REWRITE_NEW_CHAT_TEMPLATE.format(question=query)
+        if image_analysis_results == None:
+            prompt = QUERY_REWRITE_NEW_CHAT_TEMPLATE.format(question=query)
+        else:
+            image_analysis_json = json.dumps(
+                image_analysis_results,
+                ensure_ascii=False,
+                indent=2,
+            )
+            prompt = QUERY_REWRITE_NEW_CHAT_WITH_PICTURES_TEMPLATE.format(
+                question=query,
+                imageAnalysis=image_analysis_json,
+            )
         logger.info("No prior history — translating query only.")
 
     try:
