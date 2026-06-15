@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 from langchain_core.documents import Document
 
 from src.api.schemas.chat import SourceDocument
+from src.api.schemas.detection import DetectionResult
 
 
 def _get_meta(doc: Document, key: str, default: Optional[str] = None) -> Optional[str]:
@@ -93,3 +94,35 @@ def build_context(
 
     context_str = "\n\n".join(context_blocks)
     return context_str, sources
+
+def build_detection_retrieval_query(result: DetectionResult) -> str:
+    """Convert a DetectionResult into a retrieval query string for Chroma.
+
+    Combines detected issues and affected components into a single natural
+    language sentence to maximise embedding similarity against indexed
+    Epson service documents.
+
+    Args:
+        result: Parsed DetectionResult from analyze_image_for_defects().
+
+    Returns:
+        A query string ready for vector store similarity search.
+
+    Raises:
+        ValueError: If both detected_issues and affected_components are empty,
+                    meaning there is nothing to retrieve against.
+    """
+    if not result.detected_issues and not result.affected_components:
+        raise ValueError(
+            "Cannot build retrieval query: DetectionResult has no issues or components."
+        )
+
+    parts: list[str] = []
+
+    if result.detected_issues:
+        parts.append(", ".join(result.detected_issues))
+
+    if result.affected_components:
+        parts.append("affecting " + ", ".join(result.affected_components))
+
+    return " ".join(parts)
