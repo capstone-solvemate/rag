@@ -6,6 +6,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src.api.schemas.chat import Message
+from src.api.schemas.detection import DetectionResult
 from src.config import config
 from src.core.exceptions import GenerationError
 from src.llm.prompt_templates import (
@@ -200,6 +201,89 @@ async def generate_answer_with_image(
     logger.info(f"Vision answer generated successfully | answer_length={len(answer)}")
     return answer
 
+async def analyze_image_for_defects(
+    image_base64: str,
+    media_type: str,
+    detection_mode: str,
+) -> DetectionResult:
+    """Analyze an image for printer defects or print quality issues.
+
+    Step 1 of the Phase 5 detection pipeline. Sends the image to gpt-4o
+    with a structured JSON instruction prompt and parses the response into
+    a DetectionResult.
+
+    Retrieval and answer generation are NOT performed here — this function
+    returns the structured detection output only. The caller orchestrates
+    the full pipeline.
+
+    Args:
+        image_base64:   Base64-encoded image data without the data URI prefix.
+        media_type:     MIME type, e.g. "image/jpeg".
+        detection_mode: One of "quality", "defect", "both".
+
+    Returns:
+        Parsed DetectionResult from the LLM's JSON response.
+
+    Raises:
+        GenerationError: If the LLM call fails, returns empty content,
+                         or returns malformed JSON.
+        ValueError:      If image_base64 is empty or detection_mode is unrecognized
+                         (raised by build_detection_analysis_prompt).
+    """
+    logger.info(
+        f"Running detection analysis | "
+        f"detection_mode={detection_mode} "
+        f"media_type={media_type}"
+    )
+
+    messages = build_detection_analysis_prompt(
+        image_base64=image_base64,
+        media_type=media_type,
+        detection_mode=detection_mode,
+    )
+
+    try:
+        client = _get_openai_client()
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,  # type: ignore[arg-type]
+            max_tokens=512,
+            temperature=0,
+        )
+        raw = response.choices[0].message.content or ""
+        raw = raw.strip()
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.error(f"Detection LLM call failed: {type(exc).__name__}: {exc}")
+        raise GenerationError(
+            message="Detection LLM call failed. The upstream API call did not succeed.",
+            cause=exc,
+        ) from exc
+
+    if not raw:
+        logger.warning("Detection LLM returned empty content.")
+        raise GenerationError(
+            message="Detection LLM returned an empty response.",
+            cause=None,
+        )
+
+    try:
+        result = DetectionResult.model_validate_json(raw)
+    except Exception as exc:
+        logger.error(f"Detection JSON parse failed | raw='{raw[:200]}' error={exc}")
+        raise GenerationError(
+            message="Detection LLM returned malformed JSON. Could not parse DetectionResult.",
+            cause=exc,
+        ) from exc
+
+    logger.info(
+        f"Detection analysis complete | "
+        f"issues={len(result.detected_issues)} "
+        f"severity={result.severity} "
+        f"confidence={result.confidence:.2f}"
+    )
+    return result
 
 async def rewrite_query(query: str, history: list[Message]) -> str:
     """Rewrite and/or translate a query for vector store retrieval.
