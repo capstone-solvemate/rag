@@ -1,3 +1,4 @@
+# src/llm/prompt_templates.py
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
@@ -176,6 +177,103 @@ def build_vision_messages(
                 {
                     "type": "text",
                     "text": user_text,
+                },
+            ],
+        },
+    ]
+
+# ---------------------------------------------------------------------------
+# Detection analysis prompt builder
+# ---------------------------------------------------------------------------
+# Constructs the OpenAI messages array for the Phase 5 detection pipeline.
+#
+# Unlike build_vision_messages(), the image drives everything here —
+# there is no user text query. The LLM is instructed to analyze the image
+# and return a structured JSON object that the caller will parse into
+# DetectionResult.
+#
+# Structure:
+#   [ SystemMessage(detection instructions + JSON schema),
+#     UserMessage(image_url only) ]
+# ---------------------------------------------------------------------------
+
+_DETECTION_VOCABULARY: dict[str, str] = {
+    "quality": (
+        "print quality issues such as banding, streaking, ghosting, fading, "
+        "color bleed, misalignment, or uneven ink distribution"
+    ),
+    "defect": (
+        "physical printer part defects such as roller wear, head clog, "
+        "cartridge damage, paper feed issues, or contamination"
+    ),
+    "both": (
+        "print quality issues such as banding, streaking, ghosting, fading, "
+        "color bleed, misalignment, or uneven ink distribution AND "
+        "physical printer part defects such as roller wear, head clog, "
+        "cartridge damage, paper feed issues, or contamination"
+    ),
+}
+
+_DETECTION_SYSTEM_TEMPLATE = """You are a printer diagnostic expert. Analyze the provided image and detect {vocabulary}.
+
+Respond ONLY with a valid JSON object — no explanation, no markdown, no preamble. Use this exact schema:
+{{
+  "detected_issues": ["<specific issue 1>", "<specific issue 2>"],
+  "affected_components": ["<component 1>", "<component 2>"],
+  "severity": "<low|medium|high>",
+  "confidence": <float between 0.0 and 1.0>
+}}
+
+Rules:
+1. detected_issues: list every distinct issue visible. If none found, return an empty list [].
+2. affected_components: list only components directly implicated by the detected issues.
+3. severity: judge the overall impact — low (minor, cosmetic), medium (functional degradation), high (unusable output or imminent failure).
+4. confidence: your certainty that the issues are correctly identified, not that issues exist.
+5. Return ONLY the JSON object. Any text outside the JSON will cause a parse failure."""
+
+
+def build_detection_analysis_prompt(
+    image_base64: str,
+    media_type: str,
+    detection_mode: str,
+) -> list[dict]:
+    """Construct the OpenAI messages array for the detection analysis step.
+
+    The image is the sole input — no text query. The LLM is instructed to
+    return a structured JSON object parseable into DetectionResult.
+
+    Args:
+        image_base64:   Base64-encoded image data without the data URI prefix.
+        media_type:     MIME type, e.g. "image/jpeg".
+        detection_mode: One of "quality", "defect", "both".
+
+    Returns:
+        List of message dicts ready for openai.chat.completions.create().
+
+    Raises:
+        ValueError: If image_base64 is empty or detection_mode is unrecognized.
+    """
+    if not image_base64 or not image_base64.strip():
+        raise ValueError("image_base64 must be a non-empty string.")
+    if detection_mode not in _DETECTION_VOCABULARY:
+        raise ValueError(f"detection_mode must be one of {list(_DETECTION_VOCABULARY)}.")
+
+    system_content = _DETECTION_SYSTEM_TEMPLATE.format(
+        vocabulary=_DETECTION_VOCABULARY[detection_mode],
+    )
+    data_uri = f"data:{media_type};base64,{image_base64}"
+
+    return [
+        {
+            "role": "system",
+            "content": system_content,
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_uri},
                 },
             ],
         },
