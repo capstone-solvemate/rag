@@ -15,6 +15,7 @@ from src.llm.prompt_templates import (
     build_user_prompt,
     build_vision_messages,
     _TRANSLATE_QUERY_TEMPLATE,
+    build_detection_analysis_prompt
 )
 from src.utils.logger import get_logger
 

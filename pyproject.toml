@@ -28,7 +28,7 @@ include = ["src*"]
 [tool.setuptools.package-dir]
 "" = "."
 
-[tool.pytest.ini_option]
+[tool.pytest.ini_options]
 asyncio_mode="auto"
 pythonpath=["."]  
 
