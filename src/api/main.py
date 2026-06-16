@@ -6,7 +6,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.api.routes.chat import router as chat_router
-from src.api.routes.image_chat import router as image_chat_router  # ← new
+from src.api.routes.detection import router as detection_router
+from src.api.routes.image_chat import router as image_chat_router
 from src.api.routes.knowledge_base import router as kb_router
 from src.api.routes.health import health_check
 from src.api.schemas.common import ErrorResponse
@@ -65,7 +66,8 @@ async def get_health() -> HealthResponse:
     return await health_check()
 
 app.include_router(chat_router)
-app.include_router(image_chat_router)  # ← new
+app.include_router(detection_router)
+app.include_router(image_chat_router)
 app.include_router(kb_router)
 
 
