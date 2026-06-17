@@ -62,6 +62,7 @@ def build_context(
         file_name = _get_meta(doc, "file_name", default="unknown")
         file_path = _get_meta(doc, "file_path", default="unknown")
         file_type = _get_meta(doc, "file_type", default="unknown")
+        doc_id = _get_meta(doc, "doc_id", default="")
         chunk_index = _get_meta(doc, "chunk_index", default="0")
         page = _get_meta(doc, "page")  # PDF-only, may be None
 
@@ -89,6 +90,7 @@ def build_context(
                 file_name=file_name,
                 file_path=file_path,
                 chunk_index=int(chunk_index),
+                doc_id=doc_id,
             )
         )
 

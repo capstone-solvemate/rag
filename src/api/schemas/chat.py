@@ -37,6 +37,7 @@ class SourceDocument(BaseModel):
     file_name: str = Field(description="Original file name the chunk came from.")
     file_path: str = Field(description="Full path to the source file.")
     chunk_index: int = Field(description="Index of this chunk within its source document.")
+    doc_id: str = Field(description="Document Id")
 
 
 class ChatResponse(BaseModel):
